@@ -1,0 +1,180 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PASSENGER
+  DRIVER
+  ADMIN
+}
+
+enum DriverStatus {
+  OFFLINE
+  ONLINE
+  BUSY
+}
+
+enum RideStatus {
+  REQUESTED
+  ACCEPTED
+  ARRIVED
+  STARTED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  WALLET
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  phone     String   @unique
+  email     String?  @unique
+  fullName  String
+  password  String   // Hashed
+  role      Role     @default(PASSENGER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isBlocked Boolean  @default(false)
+  avatarUrl String?
+
+  // Relations
+  driverProfile Driver?
+  ridesAsPassenger Ride[] @relation("PassengerRides")
+  wallet        Wallet?
+  reviewsGiven  Rating[] @relation("Reviewer")
+  reviewsReceived Rating[] @relation("Reviewee")
+}
+
+model Driver {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique
+  user          User     @relation(fields: [userId], references: [id])
+  status        DriverStatus @default(OFFLINE)
+  isApproved    Boolean  @default(false)
+
+  // Documents
+  licenseNumber String?
+  idCardNumber  String?
+  documentUrl   String? // Link to PDF/Image of documents
+
+  // Vehicle Info
+  vehicleModel  String?
+  vehiclePlate  String?
+  vehicleColor  String?
+  vehicleYear   Int?
+
+  // Location (Last known)
+  currentLat    Float?
+  currentLng    Float?
+  lastLocationUpdate DateTime?
+
+  // Relations
+  ridesAsDriver Ride[] @relation("DriverRides")
+}
+
+model Ride {
+  id            Int      @id @default(autoincrement())
+  passengerId   Int
+  passenger     User     @relation("PassengerRides", fields: [passengerId], references: [id])
+  driverId      Int?
+  driver        Driver?  @relation("DriverRides", fields: [driverId], references: [id])
+
+  status        RideStatus @default(REQUESTED)
+
+  // Locations
+  originLat     Float
+  originLng     Float
+  originAddress String
+  destLat       Float
+  destLng       Float
+  destAddress   String
+
+  // Pricing
+  estimatedPrice Decimal  @db.Decimal(10, 2)
+  finalPrice     Decimal? @db.Decimal(10, 2)
+  distanceKm     Float?
+  durationMin    Float?
+
+  // Timestamps
+  requestedAt   DateTime @default(now())
+  acceptedAt    DateTime?
+  arrivedAt     DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+
+  paymentMethod PaymentMethod @default(CASH)
+  paymentStatus PaymentStatus @default(PENDING)
+
+  rating        Rating?
+  payment       Payment?
+}
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id])
+  balance   Decimal  @default(0.00) @db.Decimal(10, 2)
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id          Int      @id @default(autoincrement())
+  walletId    Int
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+  amount      Decimal  @db.Decimal(10, 2) // Positive for credit, negative for debit
+  type        String   // DEPOSIT, WITHDRAWAL, RIDE_PAYMENT, COMMISSION
+  referenceId String?  // e.g., Stripe Payment ID or Ride ID
+  createdAt   DateTime @default(now())
+}
+
+model Payment {
+  id            Int      @id @default(autoincrement())
+  rideId        Int      @unique
+  ride          Ride     @relation(fields: [rideId], references: [id])
+  amount        Decimal  @db.Decimal(10, 2)
+  method        PaymentMethod
+  status        PaymentStatus
+  externalId    String?  // Stripe PaymentIntent ID
+  createdAt     DateTime @default(now())
+}
+
+model Rating {
+  id          Int      @id @default(autoincrement())
+  rideId      Int      @unique
+  ride        Ride     @relation(fields: [rideId], references: [id])
+  reviewerId  Int
+  reviewer    User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  revieweeId  Int
+  reviewee    User     @relation("Reviewee", fields: [revieweeId], references: [id])
+  rating      Int      // 1-5
+  comment     String?
+  createdAt   DateTime @default(now())
+}
+
+model AdminSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String
+  description String?
+}
